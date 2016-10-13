@@ -14,20 +14,23 @@ func resourceComputeFloatingIPV2() *schema.Resource {
 		Read:   resourceComputeFloatingIPV2Read,
 		Update: nil,
 		Delete: resourceComputeFloatingIPV2Delete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
-				DefaultFunc: envDefaultFuncAllowMissing("OS_REGION_NAME"),
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 
 			"pool": &schema.Schema{
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
-				DefaultFunc: envDefaultFunc("OS_POOL_NAME"),
+				DefaultFunc: schema.EnvDefaultFunc("OS_POOL_NAME", nil),
 			},
 
 			"address": &schema.Schema{

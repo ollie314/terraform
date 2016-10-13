@@ -336,7 +336,7 @@ func resourceAwsDirectoryServiceDirectoryCreate(d *schema.ResourceData, meta int
 				d.Id(), *ds.Stage)
 			return ds, *ds.Stage, nil
 		},
-		Timeout: 30 * time.Minute,
+		Timeout: 45 * time.Minute,
 	}
 	if _, err := stateConf.WaitForState(); err != nil {
 		return fmt.Errorf(
@@ -401,6 +401,13 @@ func resourceAwsDirectoryServiceDirectoryRead(d *schema.ResourceData, meta inter
 	out, err := dsconn.DescribeDirectories(&input)
 	if err != nil {
 		return err
+
+	}
+
+	if len(out.DirectoryDescriptions) == 0 {
+		log.Printf("[WARN] Directory %s not found", d.Id())
+		d.SetId("")
+		return nil
 	}
 
 	dir := out.DirectoryDescriptions[0]

@@ -18,13 +18,16 @@ func resourceLBVipV1() *schema.Resource {
 		Read:   resourceLBVipV1Read,
 		Update: resourceLBVipV1Update,
 		Delete: resourceLBVipV1Delete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
-				DefaultFunc: envDefaultFuncAllowMissing("OS_REGION_NAME"),
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 			"name": &schema.Schema{
 				Type:     schema.TypeString,
@@ -182,6 +185,16 @@ func resourceLBVipV1Read(d *schema.ResourceData, meta interface{}) error {
 	d.Set("conn_limit", p.ConnLimit)
 	d.Set("admin_state_up", p.AdminStateUp)
 
+	// Set the persistence method being used
+	persistence := make(map[string]interface{})
+	if p.Persistence.Type != "" {
+		persistence["type"] = p.Persistence.Type
+	}
+	if p.Persistence.CookieName != "" {
+		persistence["cookie_name"] = p.Persistence.CookieName
+	}
+	d.Set("persistence", persistence)
+
 	return nil
 }
 
@@ -264,7 +277,7 @@ func resourceLBVipV1Delete(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	stateConf := &resource.StateChangeConf{
-		Pending:    []string{"ACTIVE"},
+		Pending:    []string{"ACTIVE", "PENDING_DELETE"},
 		Target:     []string{"DELETED"},
 		Refresh:    waitForLBVIPDelete(networkingClient, d.Id()),
 		Timeout:    2 * time.Minute,

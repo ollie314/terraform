@@ -186,6 +186,30 @@ func TestRulesMixedMatching(t *testing.T) {
 				},
 			},
 		},
+		// test lower/ uppercase handling
+		{
+			local: []interface{}{
+				map[string]interface{}{
+					"from_port": 80,
+					"to_port":   8000,
+					"protocol":  "TCP",
+				},
+			},
+			remote: []map[string]interface{}{
+				map[string]interface{}{
+					"from_port": int64(80),
+					"to_port":   int64(8000),
+					"protocol":  "tcp",
+				},
+			},
+			saves: []map[string]interface{}{
+				map[string]interface{}{
+					"from_port": 80,
+					"to_port":   8000,
+					"protocol":  "tcp",
+				},
+			},
+		},
 		// local and remote differ
 		{
 			local: []interface{}{
@@ -289,7 +313,7 @@ func TestRulesMixedMatching(t *testing.T) {
 				},
 			},
 		},
-		// a local rule with 2 cidrs, remote has 4 cidrs, shoudl be saved to match
+		// a local rule with 2 cidrs, remote has 4 cidrs, should be saved to match
 		// the local but also an extra rule found
 		{
 			local: []interface{}{

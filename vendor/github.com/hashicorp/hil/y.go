@@ -5,10 +5,12 @@ import __yyfmt__ "fmt"
 
 //line lang.y:6
 import (
+	"fmt"
+
 	"github.com/hashicorp/hil/ast"
 )
 
-//line lang.y:14
+//line lang.y:16
 type parserSymType struct {
 	yys      int
 	node     ast.Node
@@ -55,9 +57,9 @@ var parserStatenames = [...]string{}
 
 const parserEofCode = 1
 const parserErrCode = 2
-const parserMaxDepth = 200
+const parserInitialStackSize = 16
 
-//line lang.y:196
+//line lang.y:200
 
 //line yacctab:1
 var parserExca = [...]int{
@@ -157,18 +159,17 @@ type parserParser interface {
 }
 
 type parserParserImpl struct {
-	lookahead func() int
+	lval  parserSymType
+	stack [parserInitialStackSize]parserSymType
+	char  int
 }
 
 func (p *parserParserImpl) Lookahead() int {
-	return p.lookahead()
+	return p.char
 }
 
 func parserNewParser() parserParser {
-	p := &parserParserImpl{
-		lookahead: func() int { return -1 },
-	}
-	return p
+	return &parserParserImpl{}
 }
 
 const parserFlag = -1000
@@ -296,22 +297,20 @@ func parserParse(parserlex parserLexer) int {
 
 func (parserrcvr *parserParserImpl) Parse(parserlex parserLexer) int {
 	var parsern int
-	var parserlval parserSymType
 	var parserVAL parserSymType
 	var parserDollar []parserSymType
 	_ = parserDollar // silence set and not used
-	parserS := make([]parserSymType, parserMaxDepth)
+	parserS := parserrcvr.stack[:]
 
 	Nerrs := 0   /* number of errors */
 	Errflag := 0 /* error recovery flag */
 	parserstate := 0
-	parserchar := -1
-	parsertoken := -1 // parserchar translated into internal numbering
-	parserrcvr.lookahead = func() int { return parserchar }
+	parserrcvr.char = -1
+	parsertoken := -1 // parserrcvr.char translated into internal numbering
 	defer func() {
 		// Make sure we report no lookahead when not parsing.
 		parserstate = -1
-		parserchar = -1
+		parserrcvr.char = -1
 		parsertoken = -1
 	}()
 	parserp := -1
@@ -343,8 +342,8 @@ parsernewstate:
 	if parsern <= parserFlag {
 		goto parserdefault /* simple state */
 	}
-	if parserchar < 0 {
-		parserchar, parsertoken = parserlex1(parserlex, &parserlval)
+	if parserrcvr.char < 0 {
+		parserrcvr.char, parsertoken = parserlex1(parserlex, &parserrcvr.lval)
 	}
 	parsern += parsertoken
 	if parsern < 0 || parsern >= parserLast {
@@ -352,9 +351,9 @@ parsernewstate:
 	}
 	parsern = parserAct[parsern]
 	if parserChk[parsern] == parsertoken { /* valid shift */
-		parserchar = -1
+		parserrcvr.char = -1
 		parsertoken = -1
-		parserVAL = parserlval
+		parserVAL = parserrcvr.lval
 		parserstate = parsern
 		if Errflag > 0 {
 			Errflag--
@@ -366,8 +365,8 @@ parserdefault:
 	/* default state action */
 	parsern = parserDef[parserstate]
 	if parsern == -2 {
-		if parserchar < 0 {
-			parserchar, parsertoken = parserlex1(parserlex, &parserlval)
+		if parserrcvr.char < 0 {
+			parserrcvr.char, parsertoken = parserlex1(parserlex, &parserrcvr.lval)
 		}
 
 		/* look through exception table */
@@ -430,7 +429,7 @@ parserdefault:
 			if parsertoken == parserEofCode {
 				goto ret1
 			}
-			parserchar = -1
+			parserrcvr.char = -1
 			parsertoken = -1
 			goto parsernewstate /* try again in the same state */
 		}
@@ -473,7 +472,7 @@ parserdefault:
 
 	case 1:
 		parserDollar = parserS[parserpt-0 : parserpt+1]
-		//line lang.y:36
+		//line lang.y:38
 		{
 			parserResult = &ast.LiteralNode{
 				Value: "",
@@ -483,21 +482,21 @@ parserdefault:
 		}
 	case 2:
 		parserDollar = parserS[parserpt-1 : parserpt+1]
-		//line lang.y:44
+		//line lang.y:46
 		{
 			parserResult = parserDollar[1].node
 
-			// We want to make sure that the top value is always a Concat
-			// so that the return value is always a string type from an
+			// We want to make sure that the top value is always an Output
+			// so that the return value is always a string, list of map from an
 			// interpolation.
 			//
 			// The logic for checking for a LiteralNode is a little annoying
 			// because functionally the AST is the same, but we do that because
 			// it makes for an easy literal check later (to check if a string
 			// has any interpolations).
-			if _, ok := parserDollar[1].node.(*ast.Concat); !ok {
+			if _, ok := parserDollar[1].node.(*ast.Output); !ok {
 				if n, ok := parserDollar[1].node.(*ast.LiteralNode); !ok || n.Typex != ast.TypeString {
-					parserResult = &ast.Concat{
+					parserResult = &ast.Output{
 						Exprs: []ast.Node{parserDollar[1].node},
 						Posx:  parserDollar[1].node.Pos(),
 					}
@@ -506,59 +505,59 @@ parserdefault:
 		}
 	case 3:
 		parserDollar = parserS[parserpt-1 : parserpt+1]
-		//line lang.y:67
+		//line lang.y:69
 		{
 			parserVAL.node = parserDollar[1].node
 		}
 	case 4:
 		parserDollar = parserS[parserpt-2 : parserpt+1]
-		//line lang.y:71
+		//line lang.y:73
 		{
 			var result []ast.Node
-			if c, ok := parserDollar[1].node.(*ast.Concat); ok {
+			if c, ok := parserDollar[1].node.(*ast.Output); ok {
 				result = append(c.Exprs, parserDollar[2].node)
 			} else {
 				result = []ast.Node{parserDollar[1].node, parserDollar[2].node}
 			}
 
-			parserVAL.node = &ast.Concat{
+			parserVAL.node = &ast.Output{
 				Exprs: result,
 				Posx:  result[0].Pos(),
 			}
 		}
 	case 5:
 		parserDollar = parserS[parserpt-1 : parserpt+1]
-		//line lang.y:87
+		//line lang.y:89
 		{
 			parserVAL.node = parserDollar[1].node
 		}
 	case 6:
 		parserDollar = parserS[parserpt-1 : parserpt+1]
-		//line lang.y:91
+		//line lang.y:93
 		{
 			parserVAL.node = parserDollar[1].node
 		}
 	case 7:
 		parserDollar = parserS[parserpt-3 : parserpt+1]
-		//line lang.y:97
+		//line lang.y:99
 		{
 			parserVAL.node = parserDollar[2].node
 		}
 	case 8:
 		parserDollar = parserS[parserpt-3 : parserpt+1]
-		//line lang.y:103
+		//line lang.y:105
 		{
 			parserVAL.node = parserDollar[2].node
 		}
 	case 9:
 		parserDollar = parserS[parserpt-1 : parserpt+1]
-		//line lang.y:107
+		//line lang.y:109
 		{
 			parserVAL.node = parserDollar[1].node
 		}
 	case 10:
 		parserDollar = parserS[parserpt-1 : parserpt+1]
-		//line lang.y:111
+		//line lang.y:113
 		{
 			parserVAL.node = &ast.LiteralNode{
 				Value: parserDollar[1].token.Value.(int),
@@ -568,7 +567,7 @@ parserdefault:
 		}
 	case 11:
 		parserDollar = parserS[parserpt-1 : parserpt+1]
-		//line lang.y:119
+		//line lang.y:121
 		{
 			parserVAL.node = &ast.LiteralNode{
 				Value: parserDollar[1].token.Value.(float64),
@@ -578,14 +577,16 @@ parserdefault:
 		}
 	case 12:
 		parserDollar = parserS[parserpt-2 : parserpt+1]
-		//line lang.y:127
+		//line lang.y:129
 		{
 			// This is REALLY jank. We assume that a singular ARITH_OP
 			// means 0 ARITH_OP expr, which... is weird. We don't want to
 			// support *, /, etc., only -. We should fix this later with a pure
 			// Go scanner/parser.
 			if parserDollar[1].token.Value.(ast.ArithmeticOp) != ast.ArithmeticOpSub {
-				panic("Unary - is only allowed")
+				if parserErr == nil {
+					parserErr = fmt.Errorf("Invalid unary operation: %v", parserDollar[1].token.Value)
+				}
 			}
 
 			parserVAL.node = &ast.Arithmetic{
@@ -599,7 +600,7 @@ parserdefault:
 		}
 	case 13:
 		parserDollar = parserS[parserpt-3 : parserpt+1]
-		//line lang.y:146
+		//line lang.y:150
 		{
 			parserVAL.node = &ast.Arithmetic{
 				Op:    parserDollar[2].token.Value.(ast.ArithmeticOp),
@@ -609,19 +610,19 @@ parserdefault:
 		}
 	case 14:
 		parserDollar = parserS[parserpt-1 : parserpt+1]
-		//line lang.y:154
+		//line lang.y:158
 		{
 			parserVAL.node = &ast.VariableAccess{Name: parserDollar[1].token.Value.(string), Posx: parserDollar[1].token.Pos}
 		}
 	case 15:
 		parserDollar = parserS[parserpt-4 : parserpt+1]
-		//line lang.y:158
+		//line lang.y:162
 		{
 			parserVAL.node = &ast.Call{Func: parserDollar[1].token.Value.(string), Args: parserDollar[3].nodeList, Posx: parserDollar[1].token.Pos}
 		}
 	case 16:
 		parserDollar = parserS[parserpt-4 : parserpt+1]
-		//line lang.y:162
+		//line lang.y:166
 		{
 			parserVAL.node = &ast.Index{
 				Target: &ast.VariableAccess{
@@ -634,25 +635,25 @@ parserdefault:
 		}
 	case 17:
 		parserDollar = parserS[parserpt-0 : parserpt+1]
-		//line lang.y:174
+		//line lang.y:178
 		{
 			parserVAL.nodeList = nil
 		}
 	case 18:
 		parserDollar = parserS[parserpt-3 : parserpt+1]
-		//line lang.y:178
+		//line lang.y:182
 		{
 			parserVAL.nodeList = append(parserDollar[1].nodeList, parserDollar[3].node)
 		}
 	case 19:
 		parserDollar = parserS[parserpt-1 : parserpt+1]
-		//line lang.y:182
+		//line lang.y:186
 		{
 			parserVAL.nodeList = append(parserVAL.nodeList, parserDollar[1].node)
 		}
 	case 20:
 		parserDollar = parserS[parserpt-1 : parserpt+1]
-		//line lang.y:188
+		//line lang.y:192
 		{
 			parserVAL.node = &ast.LiteralNode{
 				Value: parserDollar[1].token.Value.(string),

@@ -51,6 +51,10 @@ The following arguments are supported:
     documentation for more information on which types of accounts can be converted
     into other types.
 
+* `enable_bool_encryption` - (Optional) Boolean flag which controls if Encryption
+    Services are enabled for Blob storage, see [here](https://azure.microsoft.com/en-us/documentation/articles/storage-service-encryption/)
+    for more information. 
+
 * `tags` - (Optional) A mapping of tags to assign to the resource.
 
 Note that although the Azure API supports setting custom domain names for
@@ -70,3 +74,14 @@ The following attributes are exported in addition to the arguments listed above:
 * `primary_table_endpoint` - The endpoint URL for table storage in the primary location.
 * `secondary_table_endpoint` - The endpoint URL for table storage in the secondary location.
 * `primary_file_endpoint` - The endpoint URL for file storage in the primary location.
+* `primary_access_key` - The primary access key for the storage account
+* `secondary_access_key` - The secondary access key for the storage account
+
+## Import
+
+Storage Accounts can be imported using the `resource id`, e.g. 
+
+```
+terraform import azurerm_storage_account.storageAcc1 /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myresourcegroup/providers/Microsoft.Storage/storageAccounts/myaccount
+```
+

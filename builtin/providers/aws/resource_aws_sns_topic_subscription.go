@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/sns"
 )
 
@@ -23,6 +24,9 @@ func resourceAwsSnsTopicSubscription() *schema.Resource {
 		Read:   resourceAwsSnsTopicSubscriptionRead,
 		Update: resourceAwsSnsTopicSubscriptionUpdate,
 		Delete: resourceAwsSnsTopicSubscriptionDelete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"protocol": &schema.Schema{
@@ -155,6 +159,12 @@ func resourceAwsSnsTopicSubscriptionRead(d *schema.ResourceData, meta interface{
 		SubscriptionArn: aws.String(d.Id()),
 	})
 	if err != nil {
+		if awsErr, ok := err.(awserr.Error); ok && awsErr.Code() == "NotFound" {
+			log.Printf("[WARN] SNS Topic Subscription (%s) not found, error code (404)", d.Id())
+			d.SetId("")
+			return nil
+		}
+
 		return err
 	}
 
@@ -214,7 +224,7 @@ func subscribeToSNSTopic(d *schema.ResourceData, snsconn *sns.SNS) (output *sns.
 
 		log.Printf("[DEBUG] SNS create topic subscription is pending so fetching the subscription list for topic : %s (%s) @ '%s'", endpoint, protocol, topic_arn)
 
-		err = resource.Retry(time.Duration(confirmation_timeout_in_minutes)*time.Minute, func() error {
+		err = resource.Retry(time.Duration(confirmation_timeout_in_minutes)*time.Minute, func() *resource.RetryError {
 
 			subscription, err := findSubscriptionByNonID(d, snsconn)
 
@@ -224,10 +234,12 @@ func subscribeToSNSTopic(d *schema.ResourceData, snsconn *sns.SNS) (output *sns.
 			}
 
 			if err != nil {
-				return fmt.Errorf("Error fetching subscriptions for SNS topic %s: %s", topic_arn, err)
+				return resource.RetryableError(
+					fmt.Errorf("Error fetching subscriptions for SNS topic %s: %s", topic_arn, err))
 			}
 
-			return fmt.Errorf("Endpoint (%s) did not autoconfirm the subscription for topic %s", endpoint, topic_arn)
+			return resource.RetryableError(
+				fmt.Errorf("Endpoint (%s) did not autoconfirm the subscription for topic %s", endpoint, topic_arn))
 		})
 
 		if err != nil {

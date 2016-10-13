@@ -39,6 +39,7 @@ The following arguments are supported:
 * `system_packages` - (Optional) Names of a set of system packages to install on the layer's instances.
 * `use_ebs_optimized_instances` - (Optional) Whether to use EBS-optimized instances.
 * `ebs_volume` - (Optional) `ebs_volume` blocks, as described below, will each create an EBS volume and connect it to the layer's instances.
+* `custom_json` - (Optional) Custom JSON attributes to apply to the layer.
 
 The following extra optional arguments, all lists of Chef recipe names, allow
 custom Chef recipes to be applied to layer instances at the five different
@@ -64,3 +65,12 @@ An `ebs_volume` block supports the following arguments:
 The following attributes are exported:
 
 * `id` - The id of the layer.
+
+
+## Import
+
+OpsWorks Custom Layers can be imported using the `id`, e.g.
+
+```
+$ terraform import aws_opsworks_custom_layer.bar 00000000-0000-0000-0000-000000000000
+```

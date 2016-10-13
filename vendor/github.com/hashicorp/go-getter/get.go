@@ -46,7 +46,7 @@ var Getters map[string]Getter
 var forcedRegexp = regexp.MustCompile(`^([A-Za-z0-9]+)::(.+)$`)
 
 func init() {
-	httpGetter := new(HttpGetter)
+	httpGetter := &HttpGetter{Netrc: true}
 
 	Getters = map[string]Getter{
 		"file":  new(FileGetter),
@@ -68,6 +68,21 @@ func Get(dst, src string) error {
 		Src:     src,
 		Dst:     dst,
 		Dir:     true,
+		Getters: Getters,
+	}).Get()
+}
+
+// GetAny downloads a URL into the given destination. Unlike Get or
+// GetFile, both directories and files are supported.
+//
+// dst must be a directory. If src is a file, it will be downloaded
+// into dst with the basename of the URL. If src is a directory or
+// archive, it will be unpacked directly into dst.
+func GetAny(dst, src string) error {
+	return (&Client{
+		Src:     src,
+		Dst:     dst,
+		Mode:    ClientModeAny,
 		Getters: Getters,
 	}).Get()
 }

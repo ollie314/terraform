@@ -22,13 +22,16 @@ func resourceLBPoolV1() *schema.Resource {
 		Read:   resourceLBPoolV1Read,
 		Update: resourceLBPoolV1Update,
 		Delete: resourceLBPoolV1Delete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
-				DefaultFunc: envDefaultFuncAllowMissing("OS_REGION_NAME"),
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 			"name": &schema.Schema{
 				Type:     schema.TypeString,
@@ -51,6 +54,12 @@ func resourceLBPoolV1() *schema.Resource {
 				Required: true,
 				ForceNew: false,
 			},
+			"lb_provider": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+				ForceNew: true,
+			},
 			"tenant_id": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
@@ -58,15 +67,16 @@ func resourceLBPoolV1() *schema.Resource {
 				Computed: true,
 			},
 			"member": &schema.Schema{
-				Type:     schema.TypeSet,
-				Optional: true,
+				Type:       schema.TypeSet,
+				Deprecated: "Use openstack_lb_member_v1 instead. This attribute will be removed in a future version.",
+				Optional:   true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"region": &schema.Schema{
 							Type:        schema.TypeString,
 							Required:    true,
 							ForceNew:    true,
-							DefaultFunc: envDefaultFuncAllowMissing("OS_REGION_NAME"),
+							DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 						},
 						"tenant_id": &schema.Schema{
 							Type:     schema.TypeString,
@@ -116,6 +126,7 @@ func resourceLBPoolV1Create(d *schema.ResourceData, meta interface{}) error {
 		SubnetID: d.Get("subnet_id").(string),
 		LBMethod: d.Get("lb_method").(string),
 		TenantID: d.Get("tenant_id").(string),
+		Provider: d.Get("lb_provider").(string),
 	}
 
 	log.Printf("[DEBUG] Create Options: %#v", createOpts)
@@ -128,6 +139,7 @@ func resourceLBPoolV1Create(d *schema.ResourceData, meta interface{}) error {
 	log.Printf("[DEBUG] Waiting for OpenStack LB pool (%s) to become available.", p.ID)
 
 	stateConf := &resource.StateChangeConf{
+		Pending:    []string{"PENDING_CREATE"},
 		Target:     []string{"ACTIVE"},
 		Refresh:    waitForLBPoolActive(networkingClient, p.ID),
 		Timeout:    2 * time.Minute,
@@ -181,6 +193,7 @@ func resourceLBPoolV1Read(d *schema.ResourceData, meta interface{}) error {
 	d.Set("protocol", p.Protocol)
 	d.Set("subnet_id", p.SubnetID)
 	d.Set("lb_method", p.LBMethod)
+	d.Set("lb_provider", p.Provider)
 	d.Set("tenant_id", p.TenantID)
 	d.Set("monitor_ids", p.MonitorIDs)
 	d.Set("member_ids", p.MemberIDs)
@@ -290,8 +303,21 @@ func resourceLBPoolV1Delete(d *schema.ResourceData, meta interface{}) error {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
 
+	// Make sure all monitors are disassociated first
+	if v, ok := d.GetOk("monitor_ids"); ok {
+		if monitorIDList, ok := v.([]interface{}); ok {
+			for _, monitorID := range monitorIDList {
+				mID := monitorID.(string)
+				log.Printf("[DEBUG] Attempting to disassociate monitor %s from pool %s", mID, d.Id())
+				if res := pools.DisassociateMonitor(networkingClient, d.Id(), mID); res.Err != nil {
+					return fmt.Errorf("Error disassociating monitor %s from pool %s: %s", mID, d.Id(), err)
+				}
+			}
+		}
+	}
+
 	stateConf := &resource.StateChangeConf{
-		Pending:    []string{"ACTIVE"},
+		Pending:    []string{"ACTIVE", "PENDING_DELETE"},
 		Target:     []string{"DELETED"},
 		Refresh:    waitForLBPoolDelete(networkingClient, d.Id()),
 		Timeout:    2 * time.Minute,

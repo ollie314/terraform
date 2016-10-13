@@ -3,6 +3,7 @@ package openstack
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/rackspace/gophercloud"
@@ -25,18 +26,40 @@ func NewClient(endpoint string) (*gophercloud.ProviderClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	hadPath := u.Path != ""
-	u.Path, u.RawQuery, u.Fragment = "", "", ""
-	base := u.String()
 
+	u.RawQuery, u.Fragment = "", ""
+
+	// Base is url with path
 	endpoint = gophercloud.NormalizeURL(endpoint)
-	base = gophercloud.NormalizeURL(base)
+	base := gophercloud.NormalizeURL(u.String())
 
-	if hadPath {
-		return &gophercloud.ProviderClient{
-			IdentityBase:     base,
-			IdentityEndpoint: endpoint,
-		}, nil
+	path := u.Path
+	if !strings.HasSuffix(path, "/") {
+		path = path + "/"
+	}
+
+	parts := strings.Split(path[0:len(path)-1], "/")
+	for index,version := range(parts) {
+		if 2 <= len(version) && len(version) <= 4 && strings.HasPrefix(version, "v") {
+			_, err := strconv.ParseFloat(version[1:], 64)
+			if err == nil {
+				// post version suffixes in path are not supported
+				// version must be on the last index
+				if index < len(parts) - 1 {
+					return nil, fmt.Errorf("Path suffixes (after version) are not supported.")
+				}
+				switch version {
+				case "v2.0", "v3":
+					// valid version found, strip from base
+					return &gophercloud.ProviderClient{
+						IdentityBase:     base[0:len(base)-len(version)-1],
+						IdentityEndpoint: endpoint,
+					}, nil
+				default:
+					return nil, fmt.Errorf("Invalid identity endpoint version %v. Supported versions: v2.0, v3", version)
+				}
+			}
+		}
 	}
 
 	return &gophercloud.ProviderClient{
@@ -134,13 +157,17 @@ func v3auth(client *gophercloud.ProviderClient, endpoint string, options gopherc
 		v3Client.Endpoint = endpoint
 	}
 
+	// copy the auth options to a local variable that we can change. `options`
+	// needs to stay as-is for reauth purposes
+	v3Options := options
+
 	var scope *tokens3.Scope
 	if options.TenantID != "" {
 		scope = &tokens3.Scope{
 			ProjectID: options.TenantID,
 		}
-		options.TenantID = ""
-		options.TenantName = ""
+		v3Options.TenantID = ""
+		v3Options.TenantName = ""
 	} else {
 		if options.TenantName != "" {
 			scope = &tokens3.Scope{
@@ -148,11 +175,11 @@ func v3auth(client *gophercloud.ProviderClient, endpoint string, options gopherc
 				DomainID:    options.DomainID,
 				DomainName:  options.DomainName,
 			}
-			options.TenantName = ""
+			v3Options.TenantName = ""
 		}
 	}
 
-	result := tokens3.Create(v3Client, options, scope)
+	result := tokens3.Create(v3Client, v3Options, scope)
 
 	token, err := result.ExtractToken()
 	if err != nil {
@@ -270,6 +297,16 @@ func NewNetworkV2(client *gophercloud.ProviderClient, eo gophercloud.EndpointOpt
 // NewBlockStorageV1 creates a ServiceClient that may be used to access the v1 block storage service.
 func NewBlockStorageV1(client *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) (*gophercloud.ServiceClient, error) {
 	eo.ApplyDefaults("volume")
+	url, err := client.EndpointLocator(eo)
+	if err != nil {
+		return nil, err
+	}
+	return &gophercloud.ServiceClient{ProviderClient: client, Endpoint: url}, nil
+}
+
+// NewBlockStorageV2 creates a ServiceClient that may be used to access the v2 block storage service.
+func NewBlockStorageV2(client *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) (*gophercloud.ServiceClient, error) {
+	eo.ApplyDefaults("volumev2")
 	url, err := client.EndpointLocator(eo)
 	if err != nil {
 		return nil, err

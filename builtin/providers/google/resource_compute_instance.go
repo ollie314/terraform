@@ -26,30 +26,6 @@ func resourceComputeInstance() *schema.Resource {
 		MigrateState:  resourceComputeInstanceMigrateState,
 
 		Schema: map[string]*schema.Schema{
-			"name": &schema.Schema{
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
-			},
-
-			"description": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				ForceNew: true,
-			},
-
-			"machine_type": &schema.Schema{
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
-			},
-
-			"zone": &schema.Schema{
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
-			},
-
 			"disk": &schema.Schema{
 				Type:     schema.TypeList,
 				Required: true,
@@ -103,6 +79,55 @@ func resourceComputeInstance() *schema.Resource {
 				},
 			},
 
+			"machine_type": &schema.Schema{
+				Type:     schema.TypeString,
+				Required: true,
+				ForceNew: true,
+			},
+
+			"name": &schema.Schema{
+				Type:     schema.TypeString,
+				Required: true,
+				ForceNew: true,
+			},
+
+			"zone": &schema.Schema{
+				Type:     schema.TypeString,
+				Required: true,
+				ForceNew: true,
+			},
+
+			"can_ip_forward": &schema.Schema{
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+				ForceNew: true,
+			},
+
+			"description": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+				ForceNew: true,
+			},
+
+			"metadata": &schema.Schema{
+				Type:         schema.TypeMap,
+				Optional:     true,
+				Elem:         schema.TypeString,
+				ValidateFunc: validateInstanceMetadata,
+			},
+
+			"metadata_startup_script": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+				ForceNew: true,
+			},
+
+			"metadata_fingerprint": &schema.Schema{
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+
 			"network_interface": &schema.Schema{
 				Type:     schema.TypeList,
 				Optional: true,
@@ -128,6 +153,8 @@ func resourceComputeInstance() *schema.Resource {
 
 						"address": &schema.Schema{
 							Type:     schema.TypeString,
+							Optional: true,
+							ForceNew: true,
 							Computed: true,
 						},
 
@@ -189,52 +216,15 @@ func resourceComputeInstance() *schema.Resource {
 				},
 			},
 
-			"can_ip_forward": &schema.Schema{
-				Type:     schema.TypeBool,
-				Optional: true,
-				Default:  false,
-				ForceNew: true,
-			},
-
-			"metadata_startup_script": &schema.Schema{
+			"project": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
 				ForceNew: true,
 			},
 
-			"metadata": &schema.Schema{
-				Type:         schema.TypeMap,
-				Optional:     true,
-				Elem:         schema.TypeString,
-				ValidateFunc: validateInstanceMetadata,
-			},
-
-			"service_account": &schema.Schema{
-				Type:     schema.TypeList,
-				Optional: true,
-				ForceNew: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"email": &schema.Schema{
-							Type:     schema.TypeString,
-							Computed: true,
-							ForceNew: true,
-						},
-
-						"scopes": &schema.Schema{
-							Type:     schema.TypeSet,
-							Required: true,
-							ForceNew: true,
-							Elem: &schema.Schema{
-								Type: schema.TypeString,
-								StateFunc: func(v interface{}) string {
-									return canonicalizeServiceScope(v.(string))
-								},
-							},
-							Set: stringScopeHashcode,
-						},
-					},
-				},
+			"self_link": &schema.Schema{
+				Type:     schema.TypeString,
+				Computed: true,
 			},
 
 			"scheduling": &schema.Schema{
@@ -260,6 +250,36 @@ func resourceComputeInstance() *schema.Resource {
 				},
 			},
 
+			"service_account": &schema.Schema{
+				Type:     schema.TypeList,
+				MaxItems: 1,
+				Optional: true,
+				ForceNew: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"email": &schema.Schema{
+							Type:     schema.TypeString,
+							ForceNew: true,
+							Optional: true,
+							Computed: true,
+						},
+
+						"scopes": &schema.Schema{
+							Type:     schema.TypeSet,
+							Required: true,
+							ForceNew: true,
+							Elem: &schema.Schema{
+								Type: schema.TypeString,
+								StateFunc: func(v interface{}) string {
+									return canonicalizeServiceScope(v.(string))
+								},
+							},
+							Set: stringScopeHashcode,
+						},
+					},
+				},
+			},
+
 			"tags": &schema.Schema{
 				Type:     schema.TypeSet,
 				Optional: true,
@@ -267,17 +287,7 @@ func resourceComputeInstance() *schema.Resource {
 				Set:      schema.HashString,
 			},
 
-			"metadata_fingerprint": &schema.Schema{
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-
 			"tags_fingerprint": &schema.Schema{
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-
-			"self_link": &schema.Schema{
 				Type:     schema.TypeString,
 				Computed: true,
 			},
@@ -286,8 +296,13 @@ func resourceComputeInstance() *schema.Resource {
 }
 
 func getInstance(config *Config, d *schema.ResourceData) (*compute.Instance, error) {
+	project, err := getProject(d, config)
+	if err != nil {
+		return nil, err
+	}
+
 	instance, err := config.clientCompute.Instances.Get(
-		config.Project, d.Get("zone").(string), d.Id()).Do()
+		project, d.Get("zone").(string), d.Id()).Do()
 	if err != nil {
 		if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 {
 			log.Printf("[WARN] Removing Instance %q because it's gone", d.Get("name").(string))
@@ -307,10 +322,15 @@ func getInstance(config *Config, d *schema.ResourceData) (*compute.Instance, err
 func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
 
+	project, err := getProject(d, config)
+	if err != nil {
+		return err
+	}
+
 	// Get the zone
 	log.Printf("[DEBUG] Loading zone: %s", d.Get("zone").(string))
 	zone, err := config.clientCompute.Zones.Get(
-		config.Project, d.Get("zone").(string)).Do()
+		project, d.Get("zone").(string)).Do()
 	if err != nil {
 		return fmt.Errorf(
 			"Error loading zone '%s': %s", d.Get("zone").(string), err)
@@ -319,7 +339,7 @@ func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) err
 	// Get the machine type
 	log.Printf("[DEBUG] Loading machine type: %s", d.Get("machine_type").(string))
 	machineType, err := config.clientCompute.MachineTypes.Get(
-		config.Project, zone.Name, d.Get("machine_type").(string)).Do()
+		project, zone.Name, d.Get("machine_type").(string)).Do()
 	if err != nil {
 		return fmt.Errorf(
 			"Error loading machine type: %s",
@@ -345,7 +365,7 @@ func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) err
 		if v, ok := d.GetOk(prefix + ".disk"); ok {
 			diskName := v.(string)
 			diskData, err := config.clientCompute.Disks.Get(
-				config.Project, zone.Name, diskName).Do()
+				project, zone.Name, diskName).Do()
 			if err != nil {
 				return fmt.Errorf(
 					"Error loading disk '%s': %s",
@@ -423,7 +443,7 @@ func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) err
 			// Load up the name of this network
 			networkName := d.Get(prefix + ".source").(string)
 			network, err := config.clientCompute.Networks.Get(
-				config.Project, networkName).Do()
+				project, networkName).Do()
 			if err != nil {
 				return fmt.Errorf(
 					"Error loading network '%s': %s",
@@ -449,26 +469,26 @@ func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) err
 		networkInterfaces = make([]*compute.NetworkInterface, 0, networkInterfacesCount)
 		for i := 0; i < networkInterfacesCount; i++ {
 			prefix := fmt.Sprintf("network_interface.%d", i)
-			// Load up the name of this network_interfac
+			// Load up the name of this network_interface
 			networkName := d.Get(prefix + ".network").(string)
 			subnetworkName := d.Get(prefix + ".subnetwork").(string)
+			address := d.Get(prefix + ".address").(string)
 			var networkLink, subnetworkLink string
 
 			if networkName != "" && subnetworkName != "" {
 				return fmt.Errorf("Cannot specify both network and subnetwork values.")
 			} else if networkName != "" {
-				network, err := config.clientCompute.Networks.Get(
-					config.Project, networkName).Do()
+				networkLink, err = getNetworkLink(d, config, prefix+".network")
 				if err != nil {
 					return fmt.Errorf(
 						"Error referencing network '%s': %s",
 						networkName, err)
 				}
-				networkLink = network.SelfLink
+
 			} else {
 				region := getRegionFromZone(d.Get("zone").(string))
 				subnetwork, err := config.clientCompute.Subnetworks.Get(
-					config.Project, region, subnetworkName).Do()
+					project, region, subnetworkName).Do()
 				if err != nil {
 					return fmt.Errorf(
 						"Error referencing subnetwork '%s' in region '%s': %s",
@@ -481,6 +501,7 @@ func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) err
 			var iface compute.NetworkInterface
 			iface.Network = networkLink
 			iface.Subnetwork = subnetworkLink
+			iface.NetworkIP = address
 
 			// Handle access_config structs
 			accessConfigsCount := d.Get(prefix + ".access_config.#").(int)
@@ -508,8 +529,13 @@ func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) err
 			scopes[i] = canonicalizeServiceScope(v.(string))
 		}
 
+		email := "default"
+		if v := d.Get(prefix + ".email"); v != nil {
+			email = v.(string)
+		}
+
 		serviceAccount := &compute.ServiceAccount{
-			Email:  "default",
+			Email:  email,
 			Scopes: scopes,
 		}
 
@@ -552,7 +578,7 @@ func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) err
 
 	log.Printf("[INFO] Requesting instance creation")
 	op, err := config.clientCompute.Instances.Insert(
-		config.Project, zone.Name, &instance).Do()
+		project, zone.Name, &instance).Do()
 	if err != nil {
 		return fmt.Errorf("Error creating instance: %s", err)
 	}
@@ -561,7 +587,7 @@ func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) err
 	d.SetId(instance.Name)
 
 	// Wait for the operation to complete
-	waitErr := computeOperationWaitZone(config, op, zone.Name, "instance to create")
+	waitErr := computeOperationWaitZone(config, op, project, zone.Name, "instance to create")
 	if waitErr != nil {
 		// The resource didn't actually create
 		d.SetId("")
@@ -724,6 +750,11 @@ func resourceComputeInstanceRead(d *schema.ResourceData, meta interface{}) error
 func resourceComputeInstanceUpdate(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
 
+	project, err := getProject(d, config)
+	if err != nil {
+		return err
+	}
+
 	zone := d.Get("zone").(string)
 
 	instance, err := getInstance(config, d)
@@ -760,12 +791,12 @@ func resourceComputeInstanceUpdate(d *schema.ResourceData, meta interface{}) err
 				return fmt.Errorf("Error updating metadata: %s", err)
 			}
 			op, err := config.clientCompute.Instances.SetMetadata(
-				config.Project, zone, d.Id(), md).Do()
+				project, zone, d.Id(), md).Do()
 			if err != nil {
 				return fmt.Errorf("Error updating metadata: %s", err)
 			}
 
-			opErr := computeOperationWaitZone(config, op, zone, "metadata to update")
+			opErr := computeOperationWaitZone(config, op, project, zone, "metadata to update")
 			if opErr != nil {
 				return opErr
 			}
@@ -780,12 +811,12 @@ func resourceComputeInstanceUpdate(d *schema.ResourceData, meta interface{}) err
 	if d.HasChange("tags") {
 		tags := resourceInstanceTags(d)
 		op, err := config.clientCompute.Instances.SetTags(
-			config.Project, zone, d.Id(), tags).Do()
+			project, zone, d.Id(), tags).Do()
 		if err != nil {
 			return fmt.Errorf("Error updating tags: %s", err)
 		}
 
-		opErr := computeOperationWaitZone(config, op, zone, "tags to update")
+		opErr := computeOperationWaitZone(config, op, project, zone, "tags to update")
 		if opErr != nil {
 			return opErr
 		}
@@ -809,14 +840,14 @@ func resourceComputeInstanceUpdate(d *schema.ResourceData, meta interface{}) err
 			scheduling.OnHostMaintenance = val.(string)
 		}
 
-		op, err := config.clientCompute.Instances.SetScheduling(config.Project,
+		op, err := config.clientCompute.Instances.SetScheduling(project,
 			zone, d.Id(), scheduling).Do()
 
 		if err != nil {
 			return fmt.Errorf("Error updating scheduling policy: %s", err)
 		}
 
-		opErr := computeOperationWaitZone(config, op, zone,
+		opErr := computeOperationWaitZone(config, op, project, zone,
 			"scheduling policy update")
 		if opErr != nil {
 			return opErr
@@ -854,11 +885,12 @@ func resourceComputeInstanceUpdate(d *schema.ResourceData, meta interface{}) err
 				// Delete any accessConfig that currently exists in instNetworkInterface
 				for _, ac := range instNetworkInterface.AccessConfigs {
 					op, err := config.clientCompute.Instances.DeleteAccessConfig(
-						config.Project, zone, d.Id(), ac.Name, networkName).Do()
+						project, zone, d.Id(), ac.Name, networkName).Do()
 					if err != nil {
 						return fmt.Errorf("Error deleting old access_config: %s", err)
 					}
-					opErr := computeOperationWaitZone(config, op, zone, "old access_config to delete")
+					opErr := computeOperationWaitZone(config, op, project, zone,
+						"old access_config to delete")
 					if opErr != nil {
 						return opErr
 					}
@@ -873,11 +905,12 @@ func resourceComputeInstanceUpdate(d *schema.ResourceData, meta interface{}) err
 						NatIP: d.Get(acPrefix + ".nat_ip").(string),
 					}
 					op, err := config.clientCompute.Instances.AddAccessConfig(
-						config.Project, zone, d.Id(), networkName, ac).Do()
+						project, zone, d.Id(), networkName, ac).Do()
 					if err != nil {
 						return fmt.Errorf("Error adding new access_config: %s", err)
 					}
-					opErr := computeOperationWaitZone(config, op, zone, "new access_config to add")
+					opErr := computeOperationWaitZone(config, op, project, zone,
+						"new access_config to add")
 					if opErr != nil {
 						return opErr
 					}
@@ -895,15 +928,20 @@ func resourceComputeInstanceUpdate(d *schema.ResourceData, meta interface{}) err
 func resourceComputeInstanceDelete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
 
+	project, err := getProject(d, config)
+	if err != nil {
+		return err
+	}
+
 	zone := d.Get("zone").(string)
 	log.Printf("[INFO] Requesting instance deletion: %s", d.Id())
-	op, err := config.clientCompute.Instances.Delete(config.Project, zone, d.Id()).Do()
+	op, err := config.clientCompute.Instances.Delete(project, zone, d.Id()).Do()
 	if err != nil {
 		return fmt.Errorf("Error deleting instance: %s", err)
 	}
 
 	// Wait for the operation to complete
-	opErr := computeOperationWaitZone(config, op, zone, "instance to delete")
+	opErr := computeOperationWaitZone(config, op, project, zone, "instance to delete")
 	if opErr != nil {
 		return opErr
 	}

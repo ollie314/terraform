@@ -13,13 +13,16 @@ func resourceComputeKeypairV2() *schema.Resource {
 		Create: resourceComputeKeypairV2Create,
 		Read:   resourceComputeKeypairV2Read,
 		Delete: resourceComputeKeypairV2Delete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
-				DefaultFunc: envDefaultFuncAllowMissing("OS_REGION_NAME"),
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 			"name": &schema.Schema{
 				Type:     schema.TypeString,

@@ -41,6 +41,7 @@ func Provider() terraform.ResourceProvider {
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
+			"cloudstack_affinity_group":       resourceCloudStackAffinityGroup(),
 			"cloudstack_disk":                 resourceCloudStackDisk(),
 			"cloudstack_egress_firewall":      resourceCloudStackEgressFirewall(),
 			"cloudstack_firewall":             resourceCloudStackFirewall(),
@@ -54,6 +55,7 @@ func Provider() terraform.ResourceProvider {
 			"cloudstack_port_forward":         resourceCloudStackPortForward(),
 			"cloudstack_secondary_ipaddress":  resourceCloudStackSecondaryIPAddress(),
 			"cloudstack_ssh_keypair":          resourceCloudStackSSHKeyPair(),
+			"cloudstack_static_nat":           resourceCloudStackStaticNAT(),
 			"cloudstack_template":             resourceCloudStackTemplate(),
 			"cloudstack_vpc":                  resourceCloudStackVPC(),
 			"cloudstack_vpn_connection":       resourceCloudStackVPNConnection(),

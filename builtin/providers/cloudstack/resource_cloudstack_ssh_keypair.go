@@ -5,7 +5,6 @@ import (
 	"log"
 	"strings"
 
-	"github.com/hashicorp/terraform/helper/pathorcontents"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/xanzy/go-cloudstack/cloudstack"
 )
@@ -56,18 +55,14 @@ func resourceCloudStackSSHKeyPairCreate(d *schema.ResourceData, meta interface{}
 
 	if publicKey != "" {
 		// Register supplied key
-		key, _, err := pathorcontents.Read(publicKey)
-		if err != nil {
-			return fmt.Errorf("Error reading the public key: %v", err)
-		}
+		p := cs.SSH.NewRegisterSSHKeyPairParams(name, publicKey)
 
-		p := cs.SSH.NewRegisterSSHKeyPairParams(name, string(key))
-
+		// If there is a project supplied, we retrieve and set the project id
 		if err := setProjectid(p, cs, d); err != nil {
 			return err
 		}
 
-		_, err = cs.SSH.RegisterSSHKeyPair(p)
+		_, err := cs.SSH.RegisterSSHKeyPair(p)
 		if err != nil {
 			return err
 		}
@@ -75,6 +70,7 @@ func resourceCloudStackSSHKeyPairCreate(d *schema.ResourceData, meta interface{}
 		// No key supplied, must create one and return the private key
 		p := cs.SSH.NewCreateSSHKeyPairParams(name)
 
+		// If there is a project supplied, we retrieve and set the project id
 		if err := setProjectid(p, cs, d); err != nil {
 			return err
 		}
@@ -100,6 +96,7 @@ func resourceCloudStackSSHKeyPairRead(d *schema.ResourceData, meta interface{}) 
 	p := cs.SSH.NewListSSHKeyPairsParams()
 	p.SetName(d.Id())
 
+	// If there is a project supplied, we retrieve and set the project id
 	if err := setProjectid(p, cs, d); err != nil {
 		return err
 	}
@@ -127,6 +124,7 @@ func resourceCloudStackSSHKeyPairDelete(d *schema.ResourceData, meta interface{}
 	// Create a new parameter struct
 	p := cs.SSH.NewDeleteSSHKeyPairParams(d.Id())
 
+	// If there is a project supplied, we retrieve and set the project id
 	if err := setProjectid(p, cs, d); err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/hashicorp/errwrap"
 	"github.com/hashicorp/terraform/helper/schema"
 )
 
@@ -16,12 +17,20 @@ func resourceAwsVpcEndpoint() *schema.Resource {
 		Read:   resourceAwsVPCEndpointRead,
 		Update: resourceAwsVPCEndpointUpdate,
 		Delete: resourceAwsVPCEndpointDelete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
+
 		Schema: map[string]*schema.Schema{
 			"policy": &schema.Schema{
-				Type:      schema.TypeString,
-				Optional:  true,
-				Computed:  true,
-				StateFunc: normalizeJson,
+				Type:         schema.TypeString,
+				Optional:     true,
+				Computed:     true,
+				ValidateFunc: validateJsonString,
+				StateFunc: func(v interface{}) string {
+					json, _ := normalizeJsonString(v)
+					return json
+				},
 			},
 			"vpc_id": &schema.Schema{
 				Type:     schema.TypeString,
@@ -39,6 +48,10 @@ func resourceAwsVpcEndpoint() *schema.Resource {
 				Elem:     &schema.Schema{Type: schema.TypeString},
 				Set:      schema.HashString,
 			},
+			"prefix_list_id": &schema.Schema{
+				Type:     schema.TypeString,
+				Computed: true,
+			},
 		},
 	}
 }
@@ -52,7 +65,10 @@ func resourceAwsVPCEndpointCreate(d *schema.ResourceData, meta interface{}) erro
 	}
 
 	if v, ok := d.GetOk("policy"); ok {
-		policy := normalizeJson(v)
+		policy, err := normalizeJsonString(v)
+		if err != nil {
+			return errwrap.Wrapf("policy contains an invalid JSON: {{err}}", err)
+		}
 		input.PolicyDocument = aws.String(policy)
 	}
 
@@ -97,12 +113,41 @@ func resourceAwsVPCEndpointRead(d *schema.ResourceData, meta interface{}) error 
 
 	vpce := output.VpcEndpoints[0]
 
+	// A VPC Endpoint is associated with exactly one prefix list name (also called Service Name).
+	// The prefix list ID can be used in security groups, so retrieve it to support that capability.
+	prefixListServiceName := *vpce.ServiceName
+	prefixListInput := &ec2.DescribePrefixListsInput{
+		Filters: []*ec2.Filter{
+			{Name: aws.String("prefix-list-name"), Values: []*string{aws.String(prefixListServiceName)}},
+		},
+	}
+
+	log.Printf("[DEBUG] Reading VPC Endpoint prefix list: %s", prefixListServiceName)
+	prefixListsOutput, err := conn.DescribePrefixLists(prefixListInput)
+
+	if err != nil {
+		_, ok := err.(awserr.Error)
+		if !ok {
+			return fmt.Errorf("Error reading VPC Endpoint prefix list: %s", err.Error())
+		}
+	}
+
+	if len(prefixListsOutput.PrefixLists) != 1 {
+		return fmt.Errorf("There are multiple prefix lists associated with the service name '%s'. Unexpected", prefixListServiceName)
+	}
+
+	policy, err := normalizeJsonString(*vpce.PolicyDocument)
+	if err != nil {
+		return errwrap.Wrapf("policy contains an invalid JSON: {{err}}", err)
+	}
+
 	d.Set("vpc_id", vpce.VpcId)
-	d.Set("policy", normalizeJson(*vpce.PolicyDocument))
+	d.Set("policy", policy)
 	d.Set("service_name", vpce.ServiceName)
 	if err := d.Set("route_table_ids", aws.StringValueSlice(vpce.RouteTableIds)); err != nil {
 		return err
 	}
+	d.Set("prefix_list_id", prefixListsOutput.PrefixLists[0].PrefixListId)
 
 	return nil
 }
@@ -130,7 +175,10 @@ func resourceAwsVPCEndpointUpdate(d *schema.ResourceData, meta interface{}) erro
 	}
 
 	if d.HasChange("policy") {
-		policy := normalizeJson(d.Get("policy"))
+		policy, err := normalizeJsonString(d.Get("policy"))
+		if err != nil {
+			return errwrap.Wrapf("policy contains an invalid JSON: {{err}}", err)
+		}
 		input.PolicyDocument = aws.String(policy)
 	}
 
